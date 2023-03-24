@@ -27,6 +27,8 @@ func revert() *cobra.Command {
 		Long:  RevertHelp,
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			var response idl.RevertResponse
+			var sourceGPHome string
+			var sourcePort int
 
 			logdir, err := utils.GetLogDir()
 			if err != nil {
@@ -50,30 +52,53 @@ func revert() *cobra.Command {
 				return err
 			}
 
-			st.RunHubSubstep(func(streams step.OutStreams) error {
-				client, err := connectToHub()
-				if err != nil {
-					return err
-				}
+			path := upgrade.GetConfigFile() + ".tmp"
+			exist, err := upgrade.PathExist(path)
+			if err != nil {
+				return xerrors.Errorf("checking temporary configuration path %q: %w", path, err)
+			}
+			if exist {
+				tempConfig := new(commands.TemporaryConfig)
+				commands.LoadConfig(tempConfig, path)
+				sourceGPHome = tempConfig.GPHome
+				sourcePort = tempConfig.Port
 
-				response, err = commanders.Revert(client, verbose)
-				if err != nil {
-					return err
-				}
+				st.RunCLISubstep(idl.Substep_archive_log_directories, func(streams step.OutStreams) error {
+					// Removing the state directory removes the step status file.
+					// Disable the store so the step framework does not try to write
+					// to a non-existent status file.
+					st.DisableStore()
+					return upgrade.DeleteDirectories([]string{utils.GetStateDir()}, upgrade.StateDirectoryFiles, streams)
+				})
+			} else {
+				st.RunHubSubstep(func(streams step.OutStreams) error {
+					client, err := connectToHub()
+					if err != nil {
+						return err
+					}
 
-				return nil
-			})
+					response, err = commanders.Revert(client, verbose)
+					if err != nil {
+						return err
+					}
 
-			st.RunCLISubstep(idl.Substep_stop_hub_and_agents, func(streams step.OutStreams) error {
-				return stopHubAndAgents()
-			})
+					sourceGPHome = response.GetSource().GPHome
+					sourcePort = int(response.GetSource().GetPort())
+
+					return nil
+				})
+
+				st.RunCLISubstep(idl.Substep_stop_hub_and_agents, func(streams step.OutStreams) error {
+					return stopHubAndAgents()
+				})
+			}
 
 			st.RunCLISubstepConditionally(idl.Substep_execute_revert_data_migration_scripts, !nonInteractive, func(streams step.OutStreams) error {
 				fmt.Println()
 				fmt.Println()
 
 				currentDir := filepath.Join(response.GetLogArchiveDirectory(), "data-migration-scripts", "current")
-				return commanders.ApplyDataMigrationScripts(nonInteractive, response.GetSource().GPHome, int(response.GetSource().GetPort()),
+				return commanders.ApplyDataMigrationScripts(nonInteractive, sourceGPHome, sourcePort),
 					utils.System.DirFS(currentDir), currentDir, idl.Step_revert)
 			})
 
@@ -115,4 +140,17 @@ To restart the upgrade, run "gpupgrade initialize" again.`,
 	cmd.Flags().MarkHidden("non-interactive") //nolint
 
 	return addHelpToCommand(cmd, RevertHelp)
+}
+
+func ArchiveCoordinatorLogDirectory(logArchiveDir string) error {
+	// Archive log directory on coordinator
+	logDir, err := utils.GetLogDir()
+	if err != nil {
+		return err
+	}
+
+	log.Printf("archiving log directory %q to %q", logDir, logArchiveDir)
+	if err = utils.Move(logDir, logArchiveDir); err != nil {
+		return err
+	}
 }

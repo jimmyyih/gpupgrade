@@ -37,6 +37,32 @@ func CreateStateDir() (err error) {
 	return nil
 }
 
+func CreateTemporaryConfigFile(gphome string, port int) error {
+	path := upgrade.GetConfigFile() + ".tmp"
+
+	exist, err := upgrade.PathExist(path)
+	if err != nil {
+		return xerrors.Errorf("checking temporary configuration path %q: %w", path, err)
+	}
+
+	if exist {
+		log.Printf("Temporary configuration file %s already present. Skipping.", path)
+		return nil
+	}
+
+	err = os.WriteFile(path, []byte(fmt.Sprintf(`{"GPHome": %s, "Port": %d}`, gphome, port)), 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func RemoveTemporaryConfigFile() error {
+	path := upgrade.GetConfigFile() + ".tmp"
+	return utils.Remove(path)
+}
+
 func CreateConfigFile(hubPort int) error {
 	path := upgrade.GetConfigFile()
 

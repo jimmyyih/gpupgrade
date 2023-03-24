@@ -190,6 +190,10 @@ func initialize() *cobra.Command {
 				return nil
 			})
 
+			st.RunInternalSubstep(func() error {
+				return commanders.CreateTemporaryConfigFile(sourceGPHome, sourcePort)
+			})
+
 			generatedScriptsOutputDir, err := utils.GetDefaultGeneratedDataMigrationScriptsDir()
 			if err != nil {
 				return nil
@@ -228,6 +232,10 @@ func initialize() *cobra.Command {
 
 				fmt.Println()
 				return commanders.Prompt(bufio.NewReader(os.Stdin), idl.Step_initialize)
+			})
+
+			st.RunInternalSubstep(func() error {
+				return commanders.RemoveTemporaryConfigFile(hubPort)
 			})
 
 			st.RunInternalSubstep(func() error {
