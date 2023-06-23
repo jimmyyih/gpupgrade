@@ -40,6 +40,8 @@ jobs:
           type: registry-image
           source:
             repository: golangci/golangci-lint
+            # Pin the image to v1.52 because v1.53 has issues with current prod Concourse
+            tag: v1.52
         inputs:
           - name: gpupgrade_src
         run:
